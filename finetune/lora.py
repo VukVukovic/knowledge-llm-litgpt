@@ -29,7 +29,7 @@ from lit_gpt.utils import (
     load_checkpoint,
     num_parameters,
 )
-from scripts.prepare_alpaca import generate_prompt
+from scripts.prepare_swisscom import generate_prompt
 
 
 def setup(
@@ -47,23 +47,23 @@ def setup(
     lora_mlp: bool = False,
     lora_head: bool = False,
     io: IOArgs = IOArgs(
-        train_data_dir=Path("data/alpaca"),
-        val_data_dir=Path("data/alpaca"),
-        checkpoint_dir=Path("checkpoints/stabilityai/stablelm-base-alpha-3b"),
-        out_dir=Path("out/lora/alpaca"),
+        train_data_dir=Path("data/swisscom-phi-2"),
+        val_data_dir=Path("data/swisscom-phi-2"),
+        checkpoint_dir=Path("checkpoints/microsoft/phi-2"),
+        out_dir=Path("out/lora/swisscom-pkg-phi-2"),
     ),
     train: TrainArgs = TrainArgs(
         save_interval=1000,
         log_interval=1,
-        global_batch_size=128,
-        micro_batch_size=4,
+        global_batch_size=64,
+        micro_batch_size=1,
         lr_warmup_steps=100,
-        epochs=5,
-        epoch_size=50000,
+        epochs=15,
+        epoch_size=3470,
         learning_rate=3e-4,
         max_seq_length=None,
     ),
-    eval: EvalArgs = EvalArgs(interval=100, max_new_tokens=100, max_iters=100),
+    eval: EvalArgs = EvalArgs(interval=100, max_new_tokens=500, max_iters=100),
 ) -> None:
     print(locals())
     precision = precision or get_default_supported_precision(training=True)
@@ -262,9 +262,9 @@ def validate(
     val_loss = losses.mean()
 
     # produce an example:
-    instruction = "Recommend a movie for me to watch during the weekend and explain the reason."
-    fabric.print(instruction)
-    sample = {"instruction": instruction, "input": ""}
+    question = "How do I exchange my physical SIM for an eSIM?"
+    fabric.print(question)
+    sample = {"input": question}
     prompt = generate_prompt(sample)
     encoded = tokenizer.encode(prompt, device=fabric.device)
     with fabric.init_tensor():
