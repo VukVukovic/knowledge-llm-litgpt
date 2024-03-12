@@ -56,7 +56,7 @@ def setup(
         save_interval= 3470//64, # after one "epoch"
         log_interval=1,
         global_batch_size=64,
-        micro_batch_size=4,
+        micro_batch_size=1,
         lr_warmup_steps=100,
         epochs=15,
         epoch_size=3470,
