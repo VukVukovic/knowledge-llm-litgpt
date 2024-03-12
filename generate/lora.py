@@ -98,7 +98,7 @@ def main(
     with open(swisscom_eval_dataset_path, "r") as f:
         eval_qa_dataset = json.load(f)
 
-    samples = [{"input" : qa["question"] for qa in eval_qa_dataset}]
+    samples = [{"input" : qa["question"]} for qa in eval_qa_dataset]
     prompts = [generate_prompt(sample) for sample in samples]
     encodeds = [tokenizer.encode(prompt, device=fabric.device) for prompt in prompts]
     max_returned_tokens = max([encoded.size(0) for encoded in encodeds]) + max_new_tokens
