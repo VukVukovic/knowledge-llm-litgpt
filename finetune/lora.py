@@ -53,17 +53,17 @@ def setup(
         out_dir=Path("out/lora/swisscom-pkg-phi-2"),
     ),
     train: TrainArgs = TrainArgs(
-        save_interval=1000,
+        save_interval= 3470//64, # after one "epoch"
         log_interval=1,
         global_batch_size=64,
-        micro_batch_size=1,
+        micro_batch_size=4,
         lr_warmup_steps=100,
         epochs=15,
         epoch_size=3470,
         learning_rate=3e-4,
         max_seq_length=None,
     ),
-    eval: EvalArgs = EvalArgs(interval=100, max_new_tokens=500, max_iters=100),
+    eval: EvalArgs = EvalArgs(interval=3470//64//4, max_new_tokens=500, max_iters=100), # 4 times per epoch
 ) -> None:
     print(locals())
     precision = precision or get_default_supported_precision(training=True)
