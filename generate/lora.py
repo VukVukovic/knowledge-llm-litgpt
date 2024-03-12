@@ -2,8 +2,10 @@
 
 import sys
 import time
+import json
 from pathlib import Path
 from typing import Literal, Optional
+from tqdm import tqdm
 
 import lightning as L
 import torch
@@ -17,19 +19,22 @@ from generate.base import generate
 from lit_gpt import Tokenizer
 from lit_gpt.lora import GPT, Config, merge_lora_weights
 from lit_gpt.utils import CLI, check_valid_checkpoint_dir, get_default_supported_precision, lazy_load
-from scripts.prepare_alpaca import generate_prompt
+from scripts.prepare_swisscom import generate_prompt
 
 
 def main(
-    prompt: str = "What food do llamas eat?",
-    input: str = "",
-    lora_path: Path = Path("out/lora/alpaca/lit_model_lora_finetuned.pth"),
-    checkpoint_dir: Path = Path("checkpoints/stabilityai/stablelm-base-alpha-3b"),
+    swisscom_eval_dataset_path: Path = Path("eval_qa_dataset.json"),
+    generated_contexts_path: Path = Path("generated_contexts.json"),
+    lora_path: Path = Path("out/lora/swisscom-pkg-phi-2/lit_model_lora_finetuned.pth"),
+    checkpoint_dir: Path = Path("checkpoints/microsoft/phi-2"),
     quantize: Optional[Literal["bnb.nf4", "bnb.nf4-dq", "bnb.fp4", "bnb.fp4-dq", "bnb.int8"]] = None,
-    max_new_tokens: int = 100,
-    top_k: Optional[int] = 200,
-    temperature: float = 0.8,
+
+    max_new_tokens: int = 600,
+    top_k: Optional[int] = 40,
+    temperature: float = 0.7,
+
     precision: Optional[str] = None,
+
     lora_r: int = 8,
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
@@ -40,13 +45,11 @@ def main(
     lora_mlp: bool = False,
     lora_head: bool = False,
 ) -> None:
-    """Generates a response based on a given instruction and an optional input.
-    This script will only work with checkpoints from the instruction-tuned GPT-LoRA model.
+    """Generates contexts for a given evaluation dataset.
     See `finetune/lora.py`.
 
     Args:
-        prompt: The prompt/instruction (Alpaca style).
-        input: Optional input (Alpaca style).
+        swisscom_eval_dataset_path: Path to the JSON with Swisscom evaluation (question-answer) dataset.
         lora_path: Path to the checkpoint with trained adapter weights, which are the output of
             `finetune/lora.py`.
         checkpoint_dir: The path to the checkpoint folder with pretrained GPT weights.
@@ -91,11 +94,14 @@ def main(
     checkpoint_path = checkpoint_dir / "lit_model.pth"
 
     tokenizer = Tokenizer(checkpoint_dir)
-    sample = {"instruction": prompt, "input": input}
-    prompt = generate_prompt(sample)
-    encoded = tokenizer.encode(prompt, device=fabric.device)
-    prompt_length = encoded.size(0)
-    max_returned_tokens = prompt_length + max_new_tokens
+
+    with open(swisscom_eval_dataset_path, "r") as f:
+        eval_qa_dataset = json.load(f)
+
+    samples = [{"input" : qa["question"] for qa in eval_qa_dataset}]
+    prompts = [generate_prompt(sample) for sample in samples]
+    encodeds = [tokenizer.encode(prompt, device=fabric.device) for prompt in prompts]
+    max_returned_tokens = max([encoded.size(0) for encoded in encodeds]) + max_new_tokens
 
     fabric.print(f"Loading model {str(checkpoint_path)!r} with {config.__dict__}", file=sys.stderr)
     t0 = time.perf_counter()
@@ -120,18 +126,30 @@ def main(
     model = fabric.setup(model)
 
     L.seed_everything(1234)
+
     t0 = time.perf_counter()
-    y = generate(model, encoded, max_returned_tokens, temperature=temperature, top_k=top_k, eos_id=tokenizer.eos_id)
+    tokens_generated = 0
+
+    contexts = []
+    for encoded in tqdm(encodeds):
+        prompt_length = encoded.size(0)
+        max_returned_tokens = prompt_length + max_new_tokens
+        y = generate(model, encoded, max_returned_tokens, temperature=temperature, top_k=top_k, eos_id=tokenizer.eos_id)
+        
+        output = tokenizer.decode(y)
+        output = output.split("### Context:")[1].strip()
+        contexts.append(output)
+
+        tokens_generated += y.size(0) - prompt_length
+        
+        
     t = time.perf_counter() - t0
-
-    output = tokenizer.decode(y)
-    output = output.split("### Response:")[1].strip()
-    fabric.print(output)
-
-    tokens_generated = y.size(0) - prompt_length
     fabric.print(f"\n\nTime for inference: {t:.02f} sec total, {tokens_generated / t:.02f} tokens/sec", file=sys.stderr)
     if fabric.device.type == "cuda":
         fabric.print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.02f} GB", file=sys.stderr)
+
+    with open(generated_contexts_path, "w") as f:
+        json.dump(contexts, f, indent=1)
 
 
 if __name__ == "__main__":
